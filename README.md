@@ -1,1 +1,0 @@
-# RudraX_community
