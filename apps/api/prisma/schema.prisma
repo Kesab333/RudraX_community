@@ -1,0 +1,436 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  GUEST
+  USER
+  CONTRIBUTOR
+  MODERATOR
+  ADMIN
+  DEVELOPER
+  RESEARCHER
+  STUDENT
+}
+
+enum Category {
+  PHYSICS
+  CHEMISTRY
+  MATHEMATICS
+  SIMULATIONS
+  RESEARCH
+  PROJECTS
+  GENERAL
+  ANNOUNCEMENTS
+  SUPPORT
+}
+
+enum PostType {
+  DISCUSSION
+  QUESTION
+  PROJECT
+  SIMULATION
+  RESEARCH_PAPER
+  BUG_REPORT
+  ANNOUNCEMENT
+}
+
+enum VisibilityState {
+  PUBLIC
+  PRIVATE
+  DRAFT
+}
+
+enum PostLifecycleState {
+  DRAFT
+  PUBLISHED
+  EDITED
+  LOCKED
+  ARCHIVED
+  DELETED
+}
+
+enum AttachmentStatus {
+  UPLOADED
+  SCAN_PENDING
+  SCAN_PASSED
+  SCAN_FAILED
+}
+
+enum NotificationType {
+  NEW_POST
+  NEW_COMMENT
+  NEW_REPLY
+  LIKE
+  MENTION
+  ANNOUNCEMENT
+  SYSTEM_UPDATE
+}
+
+enum XpEventType {
+  POST_CREATED
+  COMMENT_CREATED
+  LIKE_RECEIVED
+  ANSWER_ACCEPTED
+  DATASET_UPLOADED
+  BUG_REPORTED
+  BUG_FIXED
+  RESEARCH_PUBLISHED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  CLOSED
+}
+
+enum ModerationActionType {
+  PIN
+  UNPIN
+  LOCK
+  UNLOCK
+  DELETE
+  RESTORE
+  MUTE
+  BAN
+  REPORT_REVIEW
+}
+
+enum SearchSourceType {
+  POST
+  COMMENT
+  USER
+  TAG
+  ATTACHMENT
+  PROJECT
+  SIMULATION
+}
+
+enum SearchIndexingState {
+  PENDING
+  INDEXED
+  FAILED
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  name               String
+  email              String              @unique
+  passwordHash       String?
+  avatarUrl          String?
+  role               UserRole            @default(USER)
+  xp                 Int                 @default(0)
+  badges             Json?
+  mutedUntil         DateTime?
+  bannedAt           DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastLoginAt        DateTime?
+  posts              Post[]
+  postVersions       PostVersion[]
+  comments           Comment[]
+  attachments        Attachment[]
+  notifications      Notification[]
+  likes              Like[]
+  bookmarks          Bookmark[]
+  xpLedgerEntries    XpLedger[]
+  reports            Report[]            @relation("ReportsByUser")
+  moderationActions  ModerationAction[]  @relation("ActionsByUser")
+  reviewedReports    Report[]            @relation("ReportsReviewedByUser")
+  idempotencyRecords IdempotencyRecord[]
+  refreshTokens      RefreshToken[]
+  shareDrafts        ShareDraft[]
+
+  @@index([createdAt])
+}
+
+model Post {
+  id                 String               @id @default(cuid())
+  slug               String?              @unique
+  title              String
+  excerpt            String
+  content            String
+  category           Category
+  type               PostType
+  visibility         VisibilityState      @default(DRAFT)
+  lifecycleState     PostLifecycleState   @default(DRAFT)
+  authorId           String
+  author             User                 @relation(fields: [authorId], references: [id])
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  publishedAt        DateTime?
+  archivedAt         DateTime?
+  lockedAt           DateTime?
+  deletedAt          DateTime?
+  pinnedAt           DateTime?
+  likeCount          Int                  @default(0)
+  commentCount       Int                  @default(0)
+  acceptedCommentId  String?              @unique
+  acceptedComment    Comment?             @relation("AcceptedComment", fields: [acceptedCommentId], references: [id])
+  versions           PostVersion[]
+  comments           Comment[]            @relation("PostComments")
+  attachments        Attachment[]
+  tags               PostTag[]
+  likes              Like[]
+  bookmarks          Bookmark[]
+  reports            Report[]
+  moderationActions  ModerationAction[]
+
+  @@index([authorId])
+  @@index([category])
+  @@index([createdAt])
+  @@index([lifecycleState, visibility, createdAt(sort: Desc), id(sort: Desc)])
+}
+
+model PostVersion {
+  id          String   @id @default(cuid())
+  postId      String
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  version     Int
+  title       String
+  excerpt     String
+  content     String
+  createdAt   DateTime @default(now())
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+
+  @@unique([postId, version])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model Tag {
+  id         String    @id @default(cuid())
+  slug       String    @unique
+  label      String
+  usageCount Int       @default(0)
+  createdAt  DateTime  @default(now())
+  posts      PostTag[]
+
+  @@index([createdAt])
+}
+
+model PostTag {
+  postId String
+  tagId  String
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+}
+
+model Comment {
+  id                String            @id @default(cuid())
+  postId            String
+  post              Post              @relation("PostComments", fields: [postId], references: [id], onDelete: Cascade)
+  authorId          String
+  author            User              @relation(fields: [authorId], references: [id])
+  parentId          String?
+  parent            Comment?          @relation("CommentReplies", fields: [parentId], references: [id])
+  replies           Comment[]         @relation("CommentReplies")
+  acceptedByPost    Post?             @relation("AcceptedComment")
+  content           String
+  depth             Int
+  isAcceptedAnswer  Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
+  reports           Report[]
+  moderationActions ModerationAction[]
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+model Attachment {
+  id              String           @id @default(cuid())
+  postId          String?
+  post            Post?            @relation(fields: [postId], references: [id], onDelete: SetNull)
+  uploaderId      String
+  uploader        User             @relation(fields: [uploaderId], references: [id])
+  fileName        String
+  fileType        String
+  fileSize        Int
+  fileUrl         String?
+  storageKey      String
+  status          AttachmentStatus @default(UPLOADED)
+  uploadedAt      DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  scanCompletedAt DateTime?
+
+  @@index([postId])
+  @@index([uploaderId])
+  @@index([uploadedAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  message   String
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Like {
+  userId    String
+  postId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, postId])
+  @@index([postId])
+  @@index([createdAt])
+}
+
+model Bookmark {
+  userId    String
+  postId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, postId])
+  @@index([postId])
+  @@index([createdAt])
+}
+
+model XpLedger {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType   XpEventType
+  delta       Int
+  referenceId String?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  postId         String?
+  post           Post?        @relation(fields: [postId], references: [id], onDelete: SetNull)
+  commentId      String?
+  comment        Comment?     @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  reporterId     String
+  reporter       User         @relation("ReportsByUser", fields: [reporterId], references: [id])
+  reviewedById   String?
+  reviewedBy     User?        @relation("ReportsReviewedByUser", fields: [reviewedById], references: [id])
+  reason         String
+  resolutionNote String?
+  status         ReportStatus @default(OPEN)
+  createdAt      DateTime     @default(now())
+  reviewedAt     DateTime?
+
+  @@index([postId])
+  @@index([commentId])
+  @@index([reporterId])
+  @@index([createdAt])
+}
+
+model ModerationAction {
+  id         String               @id @default(cuid())
+  actorId    String
+  actor      User                 @relation("ActionsByUser", fields: [actorId], references: [id])
+  postId     String?
+  post       Post?                @relation(fields: [postId], references: [id], onDelete: SetNull)
+  commentId  String?
+  comment    Comment?             @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  userId     String?
+  targetUser User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actionType ModerationActionType
+  notes      String?
+  createdAt  DateTime             @default(now())
+
+  @@index([actorId])
+  @@index([postId])
+  @@index([commentId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SearchDocument {
+  id             String              @id @default(cuid())
+  sourceType     SearchSourceType
+  sourceId       String
+  title          String
+  excerpt        String
+  searchableText String
+  category       Category?
+  visibility     VisibilityState
+  indexingState  SearchIndexingState @default(PENDING)
+  publishedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([sourceType, sourceId])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  scope          String
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  requestHash    String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ShareDraft {
+  token         String   @id
+  sourceProduct String
+  authorId      String?
+  author        User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  category      Category
+  postType      PostType
+  title         String?
+  content       String
+  tags          String[]
+  attachmentIds String[]
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+  consumedAt    DateTime?
+
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}

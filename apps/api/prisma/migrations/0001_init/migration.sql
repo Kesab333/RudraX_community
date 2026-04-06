@@ -1,0 +1,3 @@
+-- Initial Phase 1 MVP schema.
+-- Apply with Prisma migrate in a PostgreSQL environment.
+-- The Prisma schema in ../schema.prisma is the source of truth.
